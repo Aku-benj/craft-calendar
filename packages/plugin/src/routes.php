@@ -26,6 +26,8 @@ return [
     'calendar/events/api/delete-occurrence' => 'calendar/events-api/delete-occurrence',
     'calendar/events/api/attributes' => 'calendar/events-api/attributes',
     'calendar/events/api/custom-fields' => 'calendar/events-api/custom-fields',
+    'calendar/events/api/create-override' => 'calendar/events-api/create-override',
+    'calendar/events/api/delete-override' => 'calendar/events-api/delete-override',
     // Views
     'calendar/month' => 'calendar/view/month-data',
     'calendar/view/<view:month|week|day>' => 'calendar/view/target-time',

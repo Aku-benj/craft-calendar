@@ -355,6 +355,68 @@ class EventsApiController extends BaseController
     }
 
     /**
+     * Quick-creates an event override based on EventId and date alone.
+     *
+     * @throws HttpException
+     * @throws \Throwable
+     * @throws BadRequestHttpException
+     */
+    public function actionCreateOverride(): Response
+    {
+        $this->requirePostRequest();
+
+        $overrideData = \Craft::$app->request->post('override');
+        $startTime = \Craft::$app->request->post('startTime');
+        $endTime = \Craft::$app->request->post('endTime');
+        $isAllDay = \Craft::$app->request->post('allDay', false);
+        $siteId = \Craft::$app->request->post('siteId', \Craft::$app->sites->currentSite->id);
+
+        if (!isset($overrideData['date']) || empty($overrideData['date'])) {
+            return $this->asFailure(Calendar::t('Override date is required'));
+        }
+
+        if (!isset($overrideData['eventId']) || empty($overrideData['eventId'])) {
+            return $this->asFailure(Calendar::t('Event not specified'));
+        }
+
+        $event = Calendar::getInstance()->events->getEventById($overrideData['eventId']);
+        if (!$event) {
+            return $this->asFailure(Calendar::t('The specified event does not exist'));
+        }
+
+        // Check permissions for the calendar
+        PermissionHelper::requireCalendarEditPermissions($event->calendar);
+
+        $date = new Carbon($overrideData['date'], DateHelper::UTC);
+        $startTime = new Carbon($startTime ?? $event->startDate, DateHelper::UTC);
+        $endTime = new Carbon($endTime ?? $event->endDate, DateHelper::UTC);
+
+        if (!$date) {
+            return $this->asFailure(Calendar::t('Event date is required'));
+        }
+
+        if ($isAllDay) {
+            $startTime->setTime(0, 0, 0);
+            $endTime->setTime(23, 59, 59);
+        }
+
+        $event = EventOverride::create($siteId, $event->id, $date);
+        $event->title = $overrideData['title'] ?? $event->title;
+        $event->enabled = true;
+        $event->authorId = \Craft::$app->user->id;
+
+        $event->startTime = $startTime;
+        $event->endTime = $endTime;
+        $event->allDay = $isAllDay;
+
+        // if (Calendar::getInstance()->events->saveEvent($event, false, true)) {
+        //     return $this->asJson(['event' => $event]);
+        // }
+
+        return $this->asFailure(Calendar::t('Could not save override'));
+    }
+
+    /**
      * @throws HttpException
      */
     private function validateAndReturnModificationData(): array

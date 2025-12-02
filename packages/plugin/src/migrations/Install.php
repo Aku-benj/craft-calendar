@@ -86,6 +86,18 @@ class Install extends StreamlinedInstallMigration
                 ->addForeignKey('eventId', 'calendar_events', 'id', ForeignKey::CASCADE)
                 ->addIndex(['eventId', 'date'], false, 'exceptions_'),
 
+            (new Table('calendar_event_overrides'))
+                ->addField('id', $this->primaryKey())
+                ->addField('eventId', $this->integer()->notNull())
+                ->addField('date', $this->dateTime()->notNull())
+                ->addField('startTime', $this->dateTime())
+                ->addField('endTime', $this->dateTime())
+                ->addField('allDay', $this->boolean())
+                ->addField('authorId', $this->integer())
+                ->addForeignKey('id', 'elements', 'id', ForeignKey::CASCADE)
+                ->addForeignKey('eventId', 'calendar_events', 'id', ForeignKey::CASCADE)
+                ->addIndex(['eventId', 'date'], true, 'overrides_'),
+
             (new Table('calendar_select_dates'))
                 ->addField('id', $this->primaryKey())
                 ->addField('date', $this->dateTime()->notNull())

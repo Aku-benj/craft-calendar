@@ -4,6 +4,7 @@ namespace Solspace\Calendar\Library\Helpers;
 
 use Solspace\Calendar\Calendar;
 use Solspace\Calendar\Elements\Event;
+use Solspace\Calendar\Elements\EventOverride;
 use Solspace\Calendar\Models\CalendarModel;
 use yii\web\ForbiddenHttpException;
 use yii\web\HttpException;
@@ -146,6 +147,17 @@ class PermissionHelper
         }
 
         return $canEditCalendar && (int) $event->authorId === (int) \Craft::$app->getUser()->id;
+    }
+
+    public static function canEditEventOverride(EventOverride $eventOverride): bool
+    {
+        $canEditCalendar = self::canEditCalendar($eventOverride->event->getCalendar());
+
+        if (self::isAdmin() || !Calendar::getInstance()->settings->isAuthoredEventEditOnly()) {
+            return $canEditCalendar;
+        }
+
+        return $canEditCalendar && (int) $eventOverride->event->authorId === (int) \Craft::$app->getUser()->id;
     }
 
     private static function isConsole(): bool
