@@ -18,12 +18,11 @@ use craft\models\FieldLayoutTab;
 use Illuminate\Support\Collection;
 use Solspace\Calendar\Calendar;
 use Solspace\Calendar\Elements\conditions\EventCondition;
-use Solspace\Calendar\Elements\Db\EventQuery;
+use Solspace\Calendar\Elements\Db\EventOverrideQuery;
 use Solspace\Calendar\Library\Duration\EventDuration;
 use Solspace\Calendar\Library\Helpers\DateHelper;
 use Solspace\Calendar\Library\Helpers\PermissionHelper;
 use Solspace\Calendar\Models\CalendarModel;
-use Symfony\Component\PropertyAccess\PropertyAccessor;
 use yii\base\Event as BaseEvent;
 use yii\base\Exception;
 use yii\base\InvalidConfigException;
@@ -37,6 +36,8 @@ class EventOverride extends Element
 
     public ?int $eventId = null;
     public ?Event $event = null;
+
+    public null|array|int|string $authorId = null;
 
     public null|Carbon|\DateTime $date = null;
 
@@ -161,12 +162,34 @@ class EventOverride extends Element
         }
     }
 
+    public function setStartTime(null|Carbon|\DateTime|string $startTime = null): void
+    {
+        if ($startTime instanceof \DateTime) {
+            // Extract Date from $date and time from $startTime 
+            $startTime = $this->date->format('Y-m-d ') . $startTime->format('H:i:s');
+
+            $this->startTime = new Carbon($startTime, DateHelper::UTC);
+            $this->startTimeLocalized = new Carbon($startTime);
+        }
+    }
+
+    public function setEndTime(null|Carbon|\DateTime|string $endTime = null): void
+    {
+        if ($endTime instanceof \DateTime) {
+            // Extract Date from $date and time from $endTime 
+            $endTime = $this->date->format('Y-m-d ') . $endTime->format('H:i:s');
+
+            $this->endTime = new Carbon($endTime, DateHelper::UTC);
+            $this->endTimeLocalized = new Carbon($endTime);
+        }
+    }
+
     /**
-     * @return ElementQueryInterface|EventQuery
+     * @return ElementQueryInterface|EventOverrideQuery
      */
     public static function find(): ElementQueryInterface
     {
-        return new EventQuery(self::class);
+        return new EventOverrideQuery(self::class);
     }
 
     public static function createCondition(): ElementConditionInterface
@@ -199,39 +222,20 @@ class EventOverride extends Element
         return false;
     }
 
-    public static function buildQuery(?array $config = null): ElementQueryInterface
-    {
-        $query = self::find();
-
-        if (null !== $config) {
-            $propertyAccessor = new PropertyAccessor();
-
-            foreach ($config as $key => $value) {
-                if ($propertyAccessor->isWritable($query, $key)) {
-                    $propertyAccessor->setValue($query, $key, $value);
-                }
-            }
-        }
-
-        $query->setOverlapThreshold(Calendar::getInstance()->settings->getOverlapThreshold());
-        $query->siteId ??= \Craft::$app->sites->currentSite->id;
-
-        return $query;
-    }
-
-    public static function create(?int $siteId = null, int $eventId): self|null
+    public static function create(?int $siteId = null, int $eventId, \DateTime $date): self|null
     {
         $event = Calendar::getInstance()->events->getEventById($eventId, $siteId);
         if (!$event) {
             return null;
         }
 
-        $element = new self();
-        $element->allDay = $event->allDay;
-        $element->date = $event->startDate;
-        $element->startTime = $event->startDate;
-        $element->endDate = $event->endDate;
-        $element->eventId = $eventId;
+        $element = new self([
+            "eventId" => $eventId,
+            "date" => $date,
+            "startTime" => $event->startDate,
+            "endTime" => $event->endDate,
+            "allDay" => $event->allDay,
+        ]);
 
         $element->enabled = true;
 
@@ -317,7 +321,7 @@ class EventOverride extends Element
      */
     public function getFieldLayout(): ?FieldLayout
     {
-        if (!$this->calendarId) {
+        if (!$this->event->calendarId) {
             return null;
         }
 

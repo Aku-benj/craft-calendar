@@ -26,8 +26,6 @@ return [
     'calendar/events/api/delete-occurrence' => 'calendar/events-api/delete-occurrence',
     'calendar/events/api/attributes' => 'calendar/events-api/attributes',
     'calendar/events/api/custom-fields' => 'calendar/events-api/custom-fields',
-    'calendar/events/api/create-override' => 'calendar/events-api/create-override',
-    'calendar/events/api/delete-override' => 'calendar/events-api/delete-override',
     // Views
     'calendar/month' => 'calendar/view/month-data',
     'calendar/view/<view:month|week|day>' => 'calendar/view/target-time',
@@ -39,4 +37,8 @@ return [
     'calendar/settings/guest-access' => 'calendar/settings/guest-access',
     'calendar/settings/ics' => 'calendar/settings/ics',
     'calendar/settings/demo-templates' => 'calendar/codepack/list-contents',
+
+    // Overrides
+    'calendar/events/<occurence:[-A-Za-z0-9+/]{11,}={0,3}>' => 'calendar/events/edit-occurence',
+    'calendar/events/<occurence:[-A-Za-z0-9+/]{11,}={0,3}>/<siteHandle:[\w\-]+>' => 'calendar/events/edit-occurence',
 ];

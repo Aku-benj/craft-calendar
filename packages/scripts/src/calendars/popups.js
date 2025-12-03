@@ -246,6 +246,18 @@ export const buildEventPopup = (event, element, calendarTimeFormat, isMultiSite 
       })
     );
 
+    if (event.repeats) {
+      const occurenceId = event.id + ':' + event.start.format('YYYY-MM-DD');
+      const encodedOccurenceId = encodeURIComponent(window.btoa(occurenceId));
+      editButton.append(
+        $('<a>', {
+          class: 'btn small edit-event-occurrence',
+          href: Craft.getCpUrl('calendar/events/' + encodedOccurenceId + (isMultiSite ? '/' + event.site.handle : '')),
+          text: Craft.t('calendar', 'Edit occurrence'),
+        })
+      );
+    }
+
     editButton.append(
       $('<a>', {
         class: 'btn small delete-event',

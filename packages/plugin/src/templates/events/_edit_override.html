@@ -1,0 +1,242 @@
+{% extends "calendar/layouts/_layoutWithoutSettings" %}
+{% import "_includes/forms" as forms %}
+
+{% set calendarHandle = calendar.handle|default %}
+{% set selectedSubnavItem = 'events' %}
+{% set saveShortcutRedirect = continueEditingUrl %}
+{% set elementType = 'Solspace\\Calendar\\Elements\\EventOveride' %}
+
+{% set fullPageForm = true %}
+
+{% set fieldLayout = override.event.getFieldLayout() %}
+
+{% set form = null %}
+{% set tabs = [] %}
+{% if fieldLayout %}
+    {% set form = fieldLayout.createForm((override.id ? override : override.event), false) %}
+    {% set tabs = form.getTabMenu() %}
+{% endif %}
+
+{% block header %}
+    <div class="flex flex-nowrap">
+        {{ block('pageTitle') }}
+    </div>
+
+    <div class="flex">
+        {{ block('actionButton') }}
+    </div>
+{% endblock %}
+
+{% block actionButton %}
+    <div class="buttons" id="action-buttons">
+        <div class="btngroup submit">
+            <input type="submit" class="btn submit" value="{{ 'Save'|t('calendar') }}">
+
+            <div class="btn submit menubtn"></div>
+            <div class="menu">
+                <ul>
+                    <li>
+                        <a class="formsubmit" data-redirect="{{ continueEditingUrl|hash }}">{{ "Save and continue editing"|t('calendar') }}<span class="shortcut">⌘S</span>
+                        </a>
+                    </li>
+                    {% if override.id and isCraft5 is defined and not isCraft5 %}
+                        <hr>
+                        <li>
+                            <a class="formsubmit error" data-action="calendar/events/delete-event" data-confirm="{{ 'Are you sure you want to delete this event?'|t('calendar') }}" data-redirect="{{ 'calendar/events'|hash }}">
+                                {{ "Delete"|t('calendar') }}
+                            </a>
+                        </li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block content %}
+
+    {% js %}
+        window.isCraft5 = {{ isCraft5 is defined and isCraft5 ? 'true' : 'false' }};
+    {% endjs %}
+
+    <input type="hidden" name="action" value="calendar/events/save-event-override">
+    {{ redirectInput('calendar/events') }}
+    {{ csrfInput() }}
+    {% if craft.app.isMultiSite %}<input type="hidden" name="siteId" value="{{ override.siteId }}">{% endif %}
+    {% if override.id %}
+        <input type="hidden" name="eventId" value="{{ override.id }}">
+        <input type="hidden" name="elementId" value="{{ override.id }}">
+    {% endif %}
+    <input type="hidden" name="elementType" value="{{ elementType }}">
+
+    <div>
+        <p class="instructions">Overrides can only edit the start and end time of an event.</p>
+
+        <div class="override-rows">
+            <div style="width: auto;">
+                {{ forms.dateField({
+                    label: "Date"|t('app'),
+                    id: 'date',
+                    name: 'date',
+                    value: (override.date ? override.date : null),
+                    errors: override.getErrors('date'),
+                    disabled: true,
+                }) }}
+                <div class="time-fields">
+                    {{ forms.timeField({
+                        label: " ",
+                        id: 'startTime',
+                        name: 'startTime',
+                        value: (override.startTimeLocalized ? override.startTimeLocalized : null),
+                        errors: override.getErrors('startTime'),
+                        data: {'error-key': 'startTime'},
+                        hasOuterContainer: true,
+                    }) }}
+                    <span> – </span>
+                    {{ forms.timeField({
+                        label: " ",
+                        id: 'endTime',
+                        name: 'endTime',
+                        value: (override.endTimeLocalized ? override.endTimeLocalized : null),
+                        errors: override.getErrors('endTime'),
+                        data: {'error-key': 'endTime'},
+                        hasOuterContainer: true,
+                    }) }}
+                </div>
+            </div>
+            <div style="width: 156px;">
+                {{ forms.lightswitchField({
+                    label: "All Day"|t('calendar'),
+                    id: 'allDay',
+                    name: 'allDay',
+                    on: override.allDay,
+                }) }}
+            </div>
+        </div>
+    </div>
+
+    {% if form %}
+        <hr>
+        <div id="fields" style="margin-bottom: 24px;">
+            {{ form.render()|raw }}
+        </div>
+    {% endif %}
+
+{% endblock %}
+
+{% block details %}
+
+    <div id="settings" class="meta">
+
+        {% set calendarStrip %}
+            <span class="color-indicator" style="background-color: {{ calendar.color }}"></span>
+            {{ calendar.name }}
+        {% endset %}
+
+        {{ forms.field({
+            label: "Calendar"|t('calendar'),
+        }, calendarStrip) }}
+
+        {% if CraftEdition == CraftPro %}
+            {{ forms.elementSelectField({
+                label: "Author"|t('calendar'),
+                id: 'author',
+                name: 'author',
+                elementType: userElementType,
+                selectionLabel: "Choose"|t('calendar'),
+                criteria: {},
+                limit: 1,
+                elements: (override.authorId is defined and override.author ? [override.author])
+            }) }}
+        {% endif %}
+    </div>
+
+    {% if override.event.id %}
+        <div class="meta read-only">
+            {% if override.id %}
+                <div class="data">
+                    <dt class="heading">{{ "ID"|t('app') }}</dt>
+                    <dd class="value">{{ override.id }}</dd>
+                </div>
+            {% endif %}
+            <div class="data">
+                <dt class="heading">{{ "Event ID"|t('app') }}</dt>
+                <dd class="value">{{ override.event.id }}</dd>
+            </div>
+            <div class="data">
+                <dt class="heading">{{ "Created at"|t('app') }}</dt>
+                <dd class="value">{{ override.dateCreated|date('short') }}, {{ override.dateCreated|time('short') }}</dd>
+            </div>
+            <div class="data">
+                <dt class="heading">{{ "Updated at"|t('app') }}</dt>
+                <dd class="value">{{ override.dateUpdated|date('short') }}, {{ override.dateUpdated|time('short') }}</dd>
+            </div>
+        </div>
+
+    {% endif %}
+
+    {# Give plugins a chance to add other things here #}
+    {% hook "cp.solspace.calendar.events.edit.details" %}
+    {% hook "cp.solspace.calendar.events.edit-override.details" %}
+
+{% endblock %}
+
+{% js %}
+$('#crumb-list .current').css({'padding-right': '10px'});
+$('.menu.menu--disclosure .menu-item.formsubmit').css({'box-shadow': 'none'});
+$('.menu.menu--disclosure .menu-item.formsubmit .icon svg path').css({'fill': 'red'});
+$('.menu.menu--disclosure .menu-item.formsubmit .menu-item-label').css({'color': 'red'});
+{% endjs %}
+
+{% js %}
+// If allDay is checked, hide time fields
+$('#allDay').on('change', function() {
+    console.log("allDay changed");
+    if ($(this).hasClass('on')) {
+        $('.time-fields').hide();
+    } else {
+        $('.time-fields').show();
+    }
+});
+{% endjs %}
+
+{% css %}
+.override-rows {
+    display: flex;
+    -webkit-box-pack: start;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    margin: 0 -10px 24px;
+}
+
+.override-rows > div {
+    padding: 0 10px;
+    display: flex;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+}
+
+.override-rows > div > .time-fields {
+    padding: 0 10px;
+    display: flex;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+}
+
+.override-rows > div > .time-fields > span {
+    margin-right: 3.5px;
+    align-self: center;
+}
+
+.override-rows > div .field {
+    margin-right: 3.5px;
+    margin-block-start: 0 !important;
+    margin-block: 20px;
+}
+
+.override-rows > div .field input {
+    padding: 6px 13px;
+    border: 1px solid rgba(96, 125, 159, 0.25);
+    box-shadow: inset 0 1px 4px -1px rgba(96, 125, 159, 0.25);
+}
+{% endcss %}

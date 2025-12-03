@@ -19,6 +19,7 @@ use Solspace\Calendar\Library\Helpers\DateHelper;
 use Solspace\Calendar\Library\Helpers\PermissionHelper;
 use Solspace\Calendar\Library\Helpers\RecurrenceHelper;
 use Solspace\Calendar\Records\CalendarRecord;
+use Solspace\Calendar\Services\OverridesService;
 use Solspace\Calendar\Services\EventsService;
 use Solspace\Calendar\Services\ExceptionsService;
 use Solspace\Calendar\Services\SelectDatesService;
@@ -1726,6 +1727,11 @@ class EventQuery extends ElementQuery
     private function getEventService(): EventsService
     {
         return Calendar::getInstance()->events;
+    }
+
+    private function getOverridesService(): OverridesService
+    {
+        return Calendar::getInstance()->overrides;
     }
 
     private function getSelectDatesService(): SelectDatesService

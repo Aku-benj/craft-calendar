@@ -35,6 +35,7 @@ use Solspace\Calendar\Models\SettingsModel;
 use Solspace\Calendar\Resources\Bundles\MainAssetBundle;
 use Solspace\Calendar\Services\CalendarSitesService;
 use Solspace\Calendar\Services\CalendarsService;
+use Solspace\Calendar\Services\OverridesService;
 use Solspace\Calendar\Services\EventsService;
 use Solspace\Calendar\Services\ExceptionsService;
 use Solspace\Calendar\Services\FormatsService;
@@ -56,6 +57,7 @@ use yii\web\ForbiddenHttpException;
  * @property CalendarsService     $calendars
  * @property CalendarSitesService $calendarSites
  * @property EventsService        $events
+ * @property OverridesService     $overrides
  * @property ExceptionsService    $exceptions
  * @property SelectDatesService   $selectDates
  * @property SettingsService      $settings
@@ -301,6 +303,7 @@ class Calendar extends Plugin
                 'calendars' => CalendarsService::class,
                 'calendarSites' => CalendarSitesService::class,
                 'events' => EventsService::class,
+                'overrides' => OverridesService::class,
                 'exceptions' => ExceptionsService::class,
                 'selectDates' => SelectDatesService::class,
                 'settings' => SettingsService::class,

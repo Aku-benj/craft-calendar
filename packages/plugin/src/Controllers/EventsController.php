@@ -16,6 +16,7 @@ use craft\helpers\UrlHelper;
 use craft\i18n\Locale;
 use Solspace\Calendar\Calendar;
 use Solspace\Calendar\Elements\Event;
+use Solspace\Calendar\Elements\EventOverride;
 use Solspace\Calendar\Library\Exceptions\EventException;
 use Solspace\Calendar\Library\Helpers\CpHelper;
 use Solspace\Calendar\Library\Helpers\PermissionHelper;
@@ -182,6 +183,73 @@ class EventsController extends BaseController
     }
 
     /**
+     * @throws HttpException
+     * @throws SiteNotFoundException
+     * @throws \yii\base\Exception
+     * @throws InvalidConfigException
+     * @throws ForbiddenHttpException
+     */
+    public function actionEditOccurence(string $occurence, ?string $siteHandle = null): Response
+    {
+        // Decode Base64 occurence ID
+        $occurence = base64_decode(urldecode($occurence));
+        // Format of occurence is eventId:date
+        $parts = explode(':', $occurence);
+        $id = $parts[0];
+        $date = $parts[1];
+
+        if (!$id || !$date) {
+            throw new HttpException(
+                404,
+                Calendar::t('Could not find an Event with ID {id}', ['id' => $id])
+            );
+        }
+
+        $date = new \DateTime($date);
+
+        $siteId = null;
+        if ($siteHandle) {
+            $site = \Craft::$app->sites->getSiteByHandle($siteHandle);
+            if (!$site) {
+                throw new HttpException(
+                    404,
+                    Calendar::t('Cannot find site by handle {handle}', ['handle' => $siteHandle])
+                );
+            }
+
+            $siteId = $site->id;
+            $locale = $site->language;
+            $locale = str_replace('_', '-', strtolower($locale));
+
+            EventEditBundle::$locale = $locale;
+        }
+
+        $event = $this->getEventsService()->getEventById($id, $siteId, false, false);
+
+        if (!$event) {
+            throw new HttpException(
+                404,
+                Calendar::t('Could not find an Event with ID {id}', ['id' => $id])
+            );
+        }
+
+        $canManageAll = PermissionHelper::checkPermission(Calendar::PERMISSION_EVENTS_FOR_ALL);
+        if (!$canManageAll) {
+            PermissionHelper::requirePermission(
+                PermissionHelper::prepareNestedPermission(
+                    Calendar::PERMISSION_EVENTS_FOR,
+                    $event->getCalendar()->uid
+                )
+            );
+        }
+
+        // Look for override for this date
+        $override = $this->getOverridesService()->getOverrideForDate($event->id, $date, $siteId);
+
+        return $this->renderEditOverrideForm($event, $override, $date);
+    }
+
+    /**
      * Saves an event.
      *
      * @throws EventException
@@ -194,6 +262,125 @@ class EventsController extends BaseController
      */
     public function actionSaveEvent(): ?Response
     {
+        $this->requirePostRequest();
+
+        $eventId = (int) \Craft::$app->request->post('eventId');
+        $siteId = (int) \Craft::$app->request->post('siteId') ?: \Craft::$app->sites->currentSite->id;
+        $postDate = \Craft::$app->request->post('postDate');
+        $event = $this->getExistingOrNewEvent($eventId, $siteId);
+
+        $values = \Craft::$app->request->post(self::EVENT_FIELD_NAME);
+        if (!$values) {
+            throw new HttpException(404, 'No event data posted');
+        }
+
+        // Update authors only if not Craft Solo
+        // And if the author is posted.
+        // If not - it stays the same
+        // By default the Logged in user ID is used
+        if (\Craft::Solo !== \Craft::$app->getEdition()) {
+            $authorList = \Craft::$app->request->post('author');
+            if (\is_array($authorList) && !empty($authorList)) {
+                $authorId = (int) reset($authorList);
+                $event->authorId = $authorId;
+            }
+        }
+
+        if (!$event->authorId) {
+            $event->authorId = (int) (new Query())
+                ->select('id')
+                ->from(Table::USERS)
+                ->where(['admin' => 1])
+                ->limit(1)
+                ->orderBy(['id' => \SORT_ASC])
+                ->scalar()
+            ;
+        }
+
+        if (isset($values['calendarId'])) {
+            $event->calendarId = $values['calendarId'];
+        }
+
+        $isCalendarPublic = $this->getCalendarService()->isCalendarPublic($event->getCalendar());
+
+        $isNewAndPublic = !$event->id && !$isCalendarPublic;
+        if ($eventId || $isNewAndPublic) {
+            PermissionHelper::requireCalendarEditPermissions($event->getCalendar());
+        }
+
+        $enabledForSite = $this->enabledForSiteValue();
+        if (\is_array($enabledForSite)) {
+            // Set the global status to true if it's enabled for *any* sites, or if already enabled.
+            $event->enabled = \in_array(true, $enabledForSite, false) || $event->enabled;
+        } else {
+            $event->enabled = (bool) $this->request->getBodyParam('enabled', $event->enabled);
+        }
+        $event->setEnabledForSite($enabledForSite ?? $event->getEnabledForSite());
+        $event->title = \Craft::$app->request->post('title', $event->title);
+        $event->slug = \Craft::$app->request->post('slug', $event->slug);
+        $event->setFieldValuesFromRequest('fields');
+        $event->setEvent_builder_data(\Craft::$app->request->post('event_builder_data', '[]'));
+
+        if ($postDate) {
+            $date = $postDate['date'];
+            $time = $postDate['time'];
+
+            if ($date) {
+                $event->postDate = DateTimeHelper::toDateTime(['date' => $date, 'time' => $time], true);
+            } else {
+                $event->postDate = new Carbon();
+            }
+        }
+
+        // Save the entry (finally!)
+        if ($event->enabled && $event->enabledForSite) {
+            $event->setScenario(Element::SCENARIO_LIVE);
+        }
+
+        if ($this->getEventsService()->saveEvent($event)) {
+            $event->siteId = $siteId;
+
+            // Return JSON response if the request is an AJAX request
+            if (\Craft::$app->request->isAjax) {
+                return $this->asJson(['success' => true]);
+            }
+
+            \Craft::$app->session->setNotice(Calendar::t('Event saved.'));
+            \Craft::$app->session->setFlash('calendar_event_saved');
+
+            return $this->redirectToPostedUrl($event);
+        }
+
+        // Return JSON response if the request is an AJAX request
+        if (\Craft::$app->request->isAjax) {
+            return $this->asJson(['success' => false]);
+        }
+
+        \Craft::$app->session->setError(Calendar::t('Couldn’t save event.'));
+
+        if (\Craft::$app->request->isCpRequest) {
+            return $this->renderEditForm($event, $event->title ?? '');
+        }
+
+        \Craft::$app->urlManager->setRouteParams(['event' => $event, 'errors' => $event->getErrors()]);
+
+        return null;
+    }
+
+    /**
+     * Saves an event override.
+     *
+     * @throws EventException
+     * @throws HttpException
+     * @throws \Throwable
+     * @throws SiteNotFoundException
+     * @throws \yii\base\Exception
+     * @throws InvalidConfigException
+     * @throws BadRequestHttpException
+     */
+    public function actionSaveEventOverride(): ?Response
+    {
+        // TODO
         $this->requirePostRequest();
 
         $eventId = (int) \Craft::$app->request->post('eventId');
@@ -703,6 +890,187 @@ class EventsController extends BaseController
                     'firstDayOfWeek' => $this->getSettingsService()->getFirstDayOfWeek(),
                     'isNewEvent' => !$event->id,
                 ],
+            ]
+        );
+    }
+
+    /**
+     * @throws SiteNotFoundException
+     * @throws \yii\base\Exception
+     * @throws InvalidConfigException
+     */
+    private function renderEditOverrideForm(Event $event, null|EventOverride $override, \DateTime $date): Response
+    {
+        $this->requireEventPermission();
+
+        $calendar = $event->getCalendar();
+        if ( $override === null ) {
+            $override = EventOverride::create($event->siteId, $event->id, $date);
+            $override->authorId = \Craft::$app->user->id;
+        }
+
+        // Only override datas that have changed
+        if (empty($override->title)) {
+            $override->title = $event->title;
+        }
+        if (empty($override->allDay)) {
+            $override->allDay = $event->allDay;
+        }
+        if (empty($override->startTime)) {
+            $override->setStartTime($event->startDate);
+        }
+        if (empty($override->endTime)) {
+            $override->setEndTime($event->endDate);
+        }
+
+        $title = $override->title;
+
+        \Craft::$app->view->registerAssetBundle(EventEditBundle::class);
+
+        if (\Craft::$app->request->getIsCpRequest()) {
+            \Craft::$app->view->registerTranslations(
+                Calendar::TRANSLATION_CATEGORY,
+                [
+                    'Date',
+                    'Today',
+                    'All Day',
+                    'Select dates',
+                ]
+            );
+        }
+
+        $site = SitesHelper::getCurrentCpSite();
+        $sites = SitesHelper::getEditableSites();
+        $isCraft5 = version_compare(\Craft::$app->getVersion(), '5.0.0', '>=');
+
+        // -- Breadcrumbs construction
+        $crumbs = [];
+
+        if ($isCraft5 && $site && \Craft::$app->getIsMultiSite()) {
+            $allowedCalendarSites = Calendar::getInstance()->calendarSites->getAllowedCalendarSites($calendar);
+            $allowedCalendarSiteNames = array_map(fn ($item) => $item['name'], $allowedCalendarSites);
+
+            $allSiteItems = CpHelper::siteMenuItems($sites, $site);
+            $filteredItems = [];
+
+            foreach ($allSiteItems as $entry) {
+                if (!\is_array($entry)) {
+                    continue;
+                }
+
+                if (!empty($entry['items']) && \is_array($entry['items'])) {
+                    $filteredGroupItems = [];
+
+                    foreach ($entry['items'] as $item) {
+                        if (isset($item['label']) && \in_array($item['label'], $allowedCalendarSiteNames, true)) {
+                            $filteredGroupItems[] = $item;
+                        }
+                    }
+
+                    if (!empty($filteredGroupItems)) {
+                        $filteredItems[] = [
+                            'heading' => $entry['heading'] ?? null,
+                            'items' => $filteredGroupItems,
+                        ];
+                    }
+                } elseif (isset($entry['label']) && \in_array($entry['label'], $allowedCalendarSiteNames, true)) {
+                    $filteredItems[] = $entry;
+                }
+            }
+
+            $crumbs[] = [
+                'id' => 'site-crumb',
+                'icon' => Cp::earthIcon(),
+                'label' => \Craft::t('site', $site->name),
+                'menu' => [
+                    'label' => \Craft::t('site', 'Select site'),
+                    'items' => $filteredItems,
+                ],
+            ];
+        }
+
+        $crumbs[] = [
+            'label' => Calendar::t(Calendar::getInstance()->name),
+            'url' => UrlHelper::cpUrl('calendar'),
+        ];
+
+        $crumbs[] = [
+            'label' => Calendar::t('Events'),
+            'url' => UrlHelper::cpUrl('calendar/events'),
+        ];
+
+        if ($isCraft5) {
+            $calendarMenuItems = [];
+
+            foreach ($this->getCalendarService()->getAllCalendars() as $cal) {
+                $attributes = [
+                    'data' => [
+                        'calendar-id' => $cal->id,
+                    ],
+                ];
+
+                $calendarMenuItems[] = [
+                    'status' => false,
+                    'label' => $cal->name,
+                    'url' => $event->title === $title
+                        ? UrlHelper::cpUrl('calendar/events?site='.$site->handle.'&source=calendar:'.$cal->id)
+                        : UrlHelper::cpUrl('calendar/events/new/'.$cal->handle.'/'.$site->handle),
+                    'hidden' => false,
+                    'selected' => ($cal->handle === $event->calendar->handle),
+                    'attributes' => $attributes,
+                ];
+            }
+
+            $crumbs[] = [
+                'id' => 'calendar-crumb',
+                'label' => Calendar::t($calendar->name),
+                'url' => $event->title === $title
+                    ? UrlHelper::cpUrl('calendar/events?site='.$site->handle.'&source=calendar:'.$calendar->id)
+                    : UrlHelper::cpUrl('calendar/events/new/'.$calendar->handle.'/'.$site->handle),
+                'menu' => [
+                    'items' => $calendarMenuItems,
+                    'label' => Calendar::t('Select calendar'),
+                ],
+            ];
+        } else {
+            $crumbs[] = [
+                'label' => Calendar::t($event->calendar->name),
+                'url' => UrlHelper::cpUrl('calendar/events/?source=calendar%3A'.$event->calendar->id),
+            ];
+        }
+
+        if ($isCraft5) {
+            $crumbs[] = [
+                'html' => Cp::elementChipHtml($event, [
+                    'showActionMenu' => true,
+                    'showDraftName' => false,
+                ]),
+                'current' => true,
+            ];
+        } else {
+            $crumbs[] = [
+                'label' => Calendar::t($title),
+                'url' => UrlHelper::cpUrl('calendar/events/'.$event->id),
+                'current' => true,
+            ];
+        }
+
+        // -- End of Breadcrumbs construction
+
+        $template = 'calendar/events/_edit_override';
+
+        return $this->renderTemplate(
+            $template,
+            [
+                'isCraft5' => $isCraft5,
+                'crumbs' => $crumbs,
+                'name' => self::EVENT_FIELD_NAME,
+                'override' => $override,
+                'title' => $title,
+                'calendar' => $calendar,
+                'userElementType' => User::class,
+                'continueEditingUrl' => 'calendar/events/{id}/{site.handle}',
+                'site' => $override->getSite(),
             ]
         );
     }
