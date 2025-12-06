@@ -41,4 +41,5 @@ return [
     // Overrides
     'calendar/events/<occurence:[-A-Za-z0-9+/]{11,}={0,3}>' => 'calendar/events/edit-occurence',
     'calendar/events/<occurence:[-A-Za-z0-9+/]{11,}={0,3}>/<siteHandle:[\w\-]+>' => 'calendar/events/edit-occurence',
+    'calendar/events/delete-override' => 'calendar/events/delete-override',
 ];

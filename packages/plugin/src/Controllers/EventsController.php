@@ -37,6 +37,7 @@ use yii\web\ServerErrorHttpException;
 class EventsController extends BaseController
 {
     public const EVENT_FIELD_NAME = 'calendarEvent';
+    public const EVENT_OVERRIDE_FIELD_NAME = 'calendarEventOverride';
     public const EVENT_PREVIEW_EVENT = 'previewEvent';
 
     protected array|bool|int $allowAnonymous = ['save-event', 'view-shared-event'];
@@ -195,13 +196,13 @@ class EventsController extends BaseController
         $occurence = base64_decode(urldecode($occurence));
         // Format of occurence is eventId:date
         $parts = explode(':', $occurence);
-        $id = $parts[0];
+        $eventId = $parts[0];
         $date = $parts[1];
 
-        if (!$id || !$date) {
+        if (!$eventId || !$date) {
             throw new HttpException(
                 404,
-                Calendar::t('Could not find an Event with ID {id}', ['id' => $id])
+                Calendar::t('Could not find an Event with ID {id}', ['id' => $eventId])
             );
         }
 
@@ -224,12 +225,12 @@ class EventsController extends BaseController
             EventEditBundle::$locale = $locale;
         }
 
-        $event = $this->getEventsService()->getEventById($id, $siteId, false, false);
+        $event = $this->getEventsService()->getEventById($eventId, $siteId, false, false);
 
         if (!$event) {
             throw new HttpException(
                 404,
-                Calendar::t('Could not find an Event with ID {id}', ['id' => $id])
+                Calendar::t('Could not find an Event with ID {id}', ['id' => $eventId])
             );
         }
 
@@ -278,7 +279,7 @@ class EventsController extends BaseController
         // And if the author is posted.
         // If not - it stays the same
         // By default the Logged in user ID is used
-        if (\Craft::Solo !== \Craft::$app->getEdition()) {
+        if (\craft\enums\CmsEdition::Solo !== \Craft::$app->getEdition()) {
             $authorList = \Craft::$app->request->post('author');
             if (\is_array($authorList) && !empty($authorList)) {
                 $authorId = (int) reset($authorList);
@@ -380,33 +381,52 @@ class EventsController extends BaseController
      */
     public function actionSaveEventOverride(): ?Response
     {
-        // TODO
         $this->requirePostRequest();
 
-        $eventId = (int) \Craft::$app->request->post('eventId');
-        $siteId = (int) \Craft::$app->request->post('siteId') ?: \Craft::$app->sites->currentSite->id;
-        $postDate = \Craft::$app->request->post('postDate');
-        $event = $this->getExistingOrNewEvent($eventId, $siteId);
-
-        $values = \Craft::$app->request->post(self::EVENT_FIELD_NAME);
+        $values = \Craft::$app->request->post(self::EVENT_OVERRIDE_FIELD_NAME);
         if (!$values) {
             throw new HttpException(404, 'No event data posted');
         }
+
+        if (isset($values['eventId'])) {
+            $eventId = (int) $values['eventId'];
+        }
+
+        if (isset($values['date'])) {
+            $date = $values['date'];
+            $date = new \DateTime($date);
+        }
+
+        if (!$eventId || !$date) {
+            throw new HttpException(404, 'No event data posted');
+        }
+
+        $overrideId = (int) \Craft::$app->request->post('overrideId');
+        $siteId = (int) \Craft::$app->request->post('siteId') ?: \Craft::$app->sites->currentSite->id;
+        $event = $this->getEventsService()->getEventById($eventId, $siteId, true);
+        if (!$event) {
+            throw new HttpException(
+                404,
+                Calendar::t('Could not find an Event with ID {id}', ['id' => $eventId])
+            );
+        }
+
+        $override = $this->getExistingOrNewOverride($overrideId, $eventId, $siteId, $date);
 
         // Update authors only if not Craft Solo
         // And if the author is posted.
         // If not - it stays the same
         // By default the Logged in user ID is used
-        if (\Craft::Solo !== \Craft::$app->getEdition()) {
+        if (\craft\enums\CmsEdition::Solo !== \Craft::$app->getEdition()) {
             $authorList = \Craft::$app->request->post('author');
             if (\is_array($authorList) && !empty($authorList)) {
                 $authorId = (int) reset($authorList);
-                $event->authorId = $authorId;
+                $override->authorId = $authorId;
             }
         }
 
-        if (!$event->authorId) {
-            $event->authorId = (int) (new Query())
+        if (!$override->authorId) {
+            $override->authorId = (int) (new Query())
                 ->select('id')
                 ->from(Table::USERS)
                 ->where(['admin' => 1])
@@ -416,58 +436,42 @@ class EventsController extends BaseController
             ;
         }
 
-        if (isset($values['calendarId'])) {
-            $event->calendarId = $values['calendarId'];
-        }
-
         $isCalendarPublic = $this->getCalendarService()->isCalendarPublic($event->getCalendar());
 
-        $isNewAndPublic = !$event->id && !$isCalendarPublic;
-        if ($eventId || $isNewAndPublic) {
+        $isNewAndPublic = !$override->id && !$isCalendarPublic;
+        if ($overrideId || $isNewAndPublic) {
             PermissionHelper::requireCalendarEditPermissions($event->getCalendar());
         }
 
         $enabledForSite = $this->enabledForSiteValue();
         if (\is_array($enabledForSite)) {
             // Set the global status to true if it's enabled for *any* sites, or if already enabled.
-            $event->enabled = \in_array(true, $enabledForSite, false) || $event->enabled;
+            $override->enabled = \in_array(true, $enabledForSite, false) || $override->enabled;
         } else {
-            $event->enabled = (bool) $this->request->getBodyParam('enabled', $event->enabled);
+            $override->enabled = (bool) $this->request->getBodyParam('enabled', $override->enabled);
         }
-        $event->setEnabledForSite($enabledForSite ?? $event->getEnabledForSite());
-        $event->title = \Craft::$app->request->post('title', $event->title);
-        $event->slug = \Craft::$app->request->post('slug', $event->slug);
-        $event->setFieldValuesFromRequest('fields');
-        $event->setEvent_builder_data(\Craft::$app->request->post('event_builder_data', '[]'));
-
-        if ($postDate) {
-            $date = $postDate['date'];
-            $time = $postDate['time'];
-
-            if ($date) {
-                $event->postDate = DateTimeHelper::toDateTime(['date' => $date, 'time' => $time], true);
-            } else {
-                $event->postDate = new Carbon();
-            }
-        }
+        $override->setEnabledForSite($enabledForSite ?? $override->getEnabledForSite());
+        $override->setOverrideDatasFromPost(\Craft::$app->request->post());
+        $override->setFieldValuesFromRequest('fields');
 
         // Save the entry (finally!)
-        if ($event->enabled && $event->enabledForSite) {
-            $event->setScenario(Element::SCENARIO_LIVE);
+        if ($override->enabled && $override->enabledForSite) {
+            $override->setScenario(Element::SCENARIO_LIVE);
         }
 
-        if ($this->getEventsService()->saveEvent($event)) {
-            $event->siteId = $siteId;
+        if ($this->getOverridesService()->saveOverride($override)) {
+            $override->siteId = $siteId;
+            $override->occurence = urlencode(base64_encode($event->id . ":" . $override->date->format('Y-m-d')));
 
             // Return JSON response if the request is an AJAX request
             if (\Craft::$app->request->isAjax) {
                 return $this->asJson(['success' => true]);
             }
 
-            \Craft::$app->session->setNotice(Calendar::t('Event saved.'));
-            \Craft::$app->session->setFlash('calendar_event_saved');
+            \Craft::$app->session->setNotice(Calendar::t('Override saved.'));
+            \Craft::$app->session->setFlash('calendar_override_saved');
 
-            return $this->redirectToPostedUrl($event);
+            return $this->redirectToPostedUrl($override);
         }
 
         // Return JSON response if the request is an AJAX request
@@ -475,13 +479,13 @@ class EventsController extends BaseController
             return $this->asJson(['success' => false]);
         }
 
-        \Craft::$app->session->setError(Calendar::t('Couldn’t save event.'));
+        \Craft::$app->session->setError(Calendar::t('Couldn’t save the override.'));
 
         if (\Craft::$app->request->isCpRequest) {
-            return $this->renderEditForm($event, $event->title ?? '');
+            return $this->renderEditOverrideForm($event, $override, $override->date);
         }
 
-        \Craft::$app->urlManager->setRouteParams(['event' => $event, 'errors' => $event->getErrors()]);
+        \Craft::$app->urlManager->setRouteParams(['override' => $override, 'errors' => $event->getErrors()]);
 
         return null;
     }
@@ -534,6 +538,56 @@ class EventsController extends BaseController
         }
 
         return $this->redirectToPostedUrl($event);
+    }
+
+    /**
+     * Deletes an event.
+     *
+     * @throws BadRequestHttpException
+     * @throws \Throwable
+     */
+    public function actionDeleteOverride()
+    {
+        $this->requireEventPermission();
+        $this->requirePostRequest();
+
+        $siteId = \Craft::$app->request->post('siteId');
+        $overrideId = \Craft::$app->request->post('overrideId');
+        if (!$overrideId) {
+            if (\Craft::$app->request->isAjax) {
+                return $this->asJson(['success' => false, 'message' => Calendar::t('Override ID was missing.')]);
+            }
+
+            return false;
+        }
+
+        $override = $this->getOverridesService()->getOverrideById($overrideId, $siteId, true);
+        if (!$override) {
+            if (\Craft::$app->request->isAjax) {
+                return $this->asJson(['success' => false, 'message' => Calendar::t('Could not find an Event override with ID {id}', ['id' => $overrideId])]);
+            }
+
+            return false;
+        }
+
+        $deleted = $this->getOverridesService()->deleteOverride($override);
+        if (!$deleted) {
+            if (\Craft::$app->request->isAjax) {
+                return $this->asJson(['success' => false, 'message' => Calendar::t('Couldn’t delete event override.')]);
+            }
+
+            return false;
+        }
+
+        $message = Calendar::t('Event override deleted.');
+
+        \Craft::$app->session->setSuccess($message);
+
+        if (\Craft::$app->request->isAjax) {
+            return $this->asJson(['success' => true, 'message' => $message]);
+        }
+
+        return $this->redirectToPostedUrl($override->event);
     }
 
     /**
@@ -1062,14 +1116,13 @@ class EventsController extends BaseController
         return $this->renderTemplate(
             $template,
             [
-                'isCraft5' => $isCraft5,
                 'crumbs' => $crumbs,
-                'name' => self::EVENT_FIELD_NAME,
+                'name' => self::EVENT_OVERRIDE_FIELD_NAME,
                 'override' => $override,
                 'title' => $title,
                 'calendar' => $calendar,
                 'userElementType' => User::class,
-                'continueEditingUrl' => 'calendar/events/{id}/{site.handle}',
+                'continueEditingUrl' => 'calendar/events/{occurence}/{site.handle}',
                 'site' => $override->getSite(),
             ]
         );
@@ -1195,6 +1248,27 @@ class EventsController extends BaseController
         }
 
         return $event;
+    }
+
+    /**
+     * @throws \Exception
+     */
+    private function getExistingOrNewOverride(?int $overrideId = null, int $eventId, ?int $siteId = null, \DateTime $date): EventOverride
+    {
+        if ($overrideId) {
+            $override = $this->getOverridesService()->getOverrideById($overrideId, $siteId);
+
+            if (!$override) {
+                throw new HttpException(
+                    404,
+                    Calendar::t('Could not find an Override with ID {id}', ['id' => $overrideId])
+                );
+            }
+        } else {
+            $override = EventOverride::create($siteId, $eventId, $date);
+        }
+
+        return $override;
     }
 
     /**

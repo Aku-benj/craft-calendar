@@ -11,6 +11,7 @@ use craft\elements\User;
 use craft\errors\SiteNotFoundException;
 use craft\events\RegisterElementActionsEvent;
 use craft\fieldlayoutelements\TitleField;
+use craft\helpers\DateTimeHelper;
 use craft\helpers\ElementHelper;
 use craft\helpers\UrlHelper;
 use craft\models\FieldLayout;
@@ -20,7 +21,6 @@ use Solspace\Calendar\Calendar;
 use Solspace\Calendar\Elements\conditions\EventCondition;
 use Solspace\Calendar\Elements\Db\EventOverrideQuery;
 use Solspace\Calendar\Library\Duration\EventDuration;
-use Solspace\Calendar\Library\Helpers\DateHelper;
 use Solspace\Calendar\Library\Helpers\PermissionHelper;
 use Solspace\Calendar\Models\CalendarModel;
 use yii\base\Event as BaseEvent;
@@ -32,25 +32,21 @@ class EventOverride extends Element
     public const TABLE_STD = 'calendar_event_overrides';
     public const TABLE = '{{%' . self::TABLE_STD . '}}';
 
-    public const EVENT_TRANSFORM_JSON_VALUE = 'transform-json-value';
-
     public ?int $eventId = null;
     public ?Event $event = null;
 
     public null|array|int|string $authorId = null;
 
-    public null|Carbon|\DateTime $date = null;
+    public null|Carbon|\DateTime|string $date = null;
 
     // Overridable fields
-    public null|Carbon|\DateTime $startTime = null;
-    public null|Carbon|\DateTime $startTimeLocalized = null;
-
-    public null|Carbon|\DateTime $endTime = null;
-    public null|Carbon|\DateTime $endTimeLocalized = null;
+    public null|Carbon|\DateTime|string $startTime = null;
+    public null|Carbon|\DateTime|string $endTime = null;
 
     public ?bool $allDay = null;
 
-    public ?string $name = null;
+    public ?string $username = null;
+    public ?string $occurence = null; // For routing purposes (base64 encoded -> occurence ID : date)
 
     /**
      * Event Override constructor.
@@ -65,27 +61,23 @@ class EventOverride extends Element
         }
         $this->event = $event;
 
-        $date = $this->date;
-        if (empty($date) || !($date instanceof \DateTime)) {
+        $this->date = $this->date ? new Carbon($this->date) : null;
+        if (empty($this->date)) {
             return false;
         }
 
         $startTime = $this->startTime ?? $event->startDate;
         if ($startTime instanceof \DateTime) {
-            // Extract Date from $date and time from $startTime 
-            $startTime = $date->format('Y-m-d ') . $startTime->format('H:i:s');
+            $startTime = $startTime->format('Y-m-d H:i:s');
         }
 
         $endTime = $this->endTime ?? $event->endDate;
         if ($endTime instanceof \DateTime) {
-            // Extract Date from $date and time from $endTime
-            $endTime = $date->format('Y-m-d ') . $endTime->format('H:i:s');
+            $endTime = $endTime->format('Y-m-d H:i:s');
         }
 
-        $this->startTime = new Carbon($startTime, DateHelper::UTC);
-        $this->startTimeLocalized = new Carbon($startTime);
-        $this->endTime = new Carbon($endTime, DateHelper::UTC);
-        $this->endTimeLocalized = new Carbon($endTime);
+        $this->startTime = new Carbon($startTime);
+        $this->endTime = new Carbon($endTime);
     }
 
     public static function tableName(): string
@@ -166,10 +158,14 @@ class EventOverride extends Element
     {
         if ($startTime instanceof \DateTime) {
             // Extract Date from $date and time from $startTime 
-            $startTime = $this->date->format('Y-m-d ') . $startTime->format('H:i:s');
+            $startTimeFormatted = $this->date->format('Y-m-d ') . $startTime->format('H:i:s');
+        } else if (is_string($startTime)) {
+            // Extract Date from $date and time from $startTime 
+            $startTimeFormatted = DateTimeHelper::toDateTime(['date' => $this->date->format('Y-m-d '), 'time' => $startTime], true);
+        }
 
-            $this->startTime = new Carbon($startTime, DateHelper::UTC);
-            $this->startTimeLocalized = new Carbon($startTime);
+        if ($startTimeFormatted) {
+            $this->startTime = new Carbon($startTimeFormatted);
         }
     }
 
@@ -177,10 +173,14 @@ class EventOverride extends Element
     {
         if ($endTime instanceof \DateTime) {
             // Extract Date from $date and time from $endTime 
-            $endTime = $this->date->format('Y-m-d ') . $endTime->format('H:i:s');
+            $endTimeFormatted = $this->date->format('Y-m-d ') . $endTime->format('H:i:s');
+        } else if (is_string($endTime)) {
+            // Extract Date from $date and time from $endTime 
+            $endTimeFormatted = DateTimeHelper::toDateTime(['date' => $this->date->format('Y-m-d '), 'time' => $endTime], true);
+        }
 
-            $this->endTime = new Carbon($endTime, DateHelper::UTC);
-            $this->endTimeLocalized = new Carbon($endTime);
+        if ($endTimeFormatted) {
+            $this->endTime = new Carbon($endTimeFormatted);
         }
     }
 
@@ -232,9 +232,6 @@ class EventOverride extends Element
         $element = new self([
             "eventId" => $eventId,
             "date" => $date,
-            "startTime" => $event->startDate,
-            "endTime" => $event->endDate,
-            "allDay" => $event->allDay,
         ]);
 
         $element->enabled = true;
@@ -403,19 +400,9 @@ class EventOverride extends Element
         return $this->startTime;
     }
 
-    public function getStartTimeLocalized(): null|Carbon|\DateTime|string
-    {
-        return $this->startTimeLocalized;
-    }
-
     public function getEndTime(): null|Carbon|\DateTime|string
     {
         return $this->endTime;
-    }
-
-    public function getEndTimeLocalized(): null|Carbon|\DateTime|string
-    {
-        return $this->endTimeLocalized;
     }
 
     public function getDateCreated(): null|Carbon|\DateTime|string
@@ -425,14 +412,14 @@ class EventOverride extends Element
 
     public function getDuration(): EventDuration
     {
-        $startDate = $this->getStartTime();
-        $endDate = $this->getEndTime();
+        $startTime = $this->getStartTime();
+        $endTime = $this->getEndTime();
 
         if ($this->isAllDay()) {
-            $endDate = $endDate->copy()->addSecond();
+            $endTime = $endTime->copy()->addSecond();
         }
 
-        return new EventDuration($startDate->diff($endDate));
+        return new EventDuration($startTime->diff($endTime));
     }
 
     public function isAllDay(): bool
@@ -467,27 +454,42 @@ class EventOverride extends Element
 
     public function afterSave(bool $isNew): void
     {
-        $insertData = [
-            'authorId' => $this->authorId,
-            'date' => $this->date,
-            'startTime' => $this->startTime->toDateTimeString(),
-            'endTime' => $this->endDatendTimee->toDateTimeString(),
-            'allDay' => (bool) $this->allDay,
-        ];
+        // Don't rewrite event_overrides table values if propagating
+        if (!$this->propagating) {
 
-        $db = \Craft::$app->db;
-        if ($isNew) {
-            $insertData['id'] = $this->id;
+            // Override datas only if they are different
+            if ($this->startTime->format('H:i') === $this->event->startDate->format('H:i')) {
+                $this->startTime = null;
+            }
+            if ($this->endTime->format('H:i') === $this->event->endDate->format('H:i')) {
+                $this->endTime = null;
+            }
 
-            $db->createCommand()
-                ->insert(self::TABLE, $insertData)
-                ->execute()
-            ;
-        } else {
-            $db->createCommand()
-                ->update(self::TABLE, $insertData, ['id' => $this->id])
-                ->execute()
-            ;
+            // Fields to be inserted
+            $insertData = [
+                'authorId' => $this->authorId,
+                'startTime' => $this->startTime ? $this->startTime->format('Y-m-d H:i:s') : null,
+                'endTime' => $this->endTime ? $this->endTime->format('Y-m-d H:i:s') : null,
+                'allDay' => $this->allDay ? $this->allDay : null,
+            ];
+
+            $db = \Craft::$app->db;
+            
+            if ($isNew) {
+                $insertData['id'] = $this->id;
+                $insertData['eventId'] = $this->eventId;
+                $insertData['date'] = $this->date->format('Y-m-d');
+                
+                $db->createCommand()
+                    ->insert(self::TABLE, $insertData)
+                    ->execute()
+                ;
+            } else {
+                $db->createCommand()
+                    ->update(self::TABLE, $insertData, ['id' => $this->id])
+                    ->execute()
+                ;
+            }
         }
 
         parent::afterSave($isNew);
@@ -507,8 +509,8 @@ class EventOverride extends Element
             $this->addError('startTime', Calendar::t('Start Time must be before End Time'));
         }
 
-        if ($this->startTime->diffInDays($this->endTime, true) > 1) {
-            $this->addError('startTime', Calendar::t('The maximum time span of an override event is a day'));
+        if ($this->startTime->diffInDays($this->endTime, true) >= 1) {
+            $this->addError('startTime', Calendar::t('Start and End Time must be on the same day'));
         }
     }
 
@@ -559,5 +561,40 @@ class EventOverride extends Element
         }
 
         return $names;
+    }
+
+    public function setOverrideDatasFromPost(array $post): void
+    {
+        // Extract Date from $date and time from $startTime
+        $startTime = $post['startTime']['time'];
+        $endTime = $post['endTime']['time'];
+        $allDay = (bool) ($post['allDay'] ?? false);
+        $title = $post['title'] ?? $this->event->title;
+
+        if ($allDay !== $this->event->allDay) {
+            $this->allDay = $allDay;
+        } else {
+            $this->allDay = null;
+        }
+
+        if ($this->allDay === true) {
+            $startTime = "00:00:00";
+            $endTime = "23:59:59";
+        }
+
+        // Override datas only if they are different
+        if ($startTime) {
+            $this->setStartTime($startTime);
+        }
+
+        if ($endTime) {
+            $this->setEndTime($endTime);
+        }
+
+        if ($title !== $this->event->title) {
+            $this->title = $title;
+        } else {
+            $this->title = null;
+        }
     }
 }

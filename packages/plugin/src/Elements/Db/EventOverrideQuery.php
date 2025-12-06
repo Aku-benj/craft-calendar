@@ -64,125 +64,6 @@ class EventOverrideQuery extends ElementQuery
         return $this;
     }
 
-    // public function count($q = '*', $db = null): null|bool|int|string
-    // {
-    //     $this->all($db);
-
-    //     if (null === $this->totalCount) {
-    //         $this->totalCount = \count($this->events ?? []);
-    //     }
-
-    //     return $this->totalCount;
-    // }
-
-    // /**
-    //  * @param null|mixed $db
-    //  *
-    //  * @return null|array|ElementInterface
-    //  */
-    // public function one($db = null): null|array|Model
-    // {
-    //     $oldLimit = $this->limit;
-    //     $this->limit = 1;
-
-    //     $events = $this->all($db);
-
-    //     $this->limit = $oldLimit;
-
-    //     if (\count($events) >= 1) {
-    //         return reset($events);
-    //     }
-
-    //     return null;
-    // }
-
-    // /**
-    //  * @param null|mixed $db
-    //  *
-    //  * @return Event[]
-    //  */
-    // public function all($db = null): array
-    // {
-    //     // If an array data is requested - return it as is, without
-    //     // fetching occurrences
-    //     if ($this->asArray) {
-    //         return parent::all();
-    //     }
-
-    //     $configHash = $this->getConfigStateHash();
-
-    //     // Nasty elements index hack
-    //     if (!\Craft::$app->request->isConsoleRequest) {
-    //         $context = \Craft::$app->request->post('context');
-    //         if (\in_array($context, ['index', 'modal'], true)) {
-    //             $this->loadOccurrences = false;
-    //         }
-    //         // If we save an event via the events edit page or via the slide out panel, dont use the cached events
-    //         $action = \Craft::$app->request->post('action');
-    //         if (\in_array($action, ['elements/save', 'calendar/events/save-event'], true)) {
-    //             return parent::all();
-    //         }
-    //     }
-
-    //     if (null === $this->events || self::$lastCachedConfigStateHash !== $configHash) {
-    //         $limit = $this->limit;
-    //         $offset = $this->offset;
-    //         $indexBy = $this->indexBy;
-    //         $this->limit = null;
-    //         $this->offset = null;
-    //         $this->indexBy = null;
-
-    //         $ids = parent::ids($db);
-
-    //         $this->limit = $limit;
-    //         $this->offset = $offset;
-    //         $this->indexBy = $indexBy;
-
-    //         if (empty($ids)) {
-    //             return [];
-    //         }
-
-    //         $this->events = [];
-    //         $this->eventCache = [];
-    //         $this->eventsByDate = [];
-    //         $this->eventsByHour = [];
-    //         $this->eventsByDay = [];
-    //         $this->eventsByWeek = [];
-    //         $this->eventsByMonth = [];
-
-    //         $this->cacheSingleEvents($ids);
-    //         $this->cacheRecurringEvents($ids);
-
-    //         // Order the dates in a chronological order
-    //         if ($this->shouldOrderByStartDate() || $this->shouldOrderByEndDate()) {
-    //             $this->orderDates($this->eventCache);
-    //         }
-
-    //         if ($this->shouldRandomize()) {
-    //             $this->randomizeDates($this->eventCache);
-    //         }
-
-    //         if ($this->shuffle) {
-    //             shuffle($this->eventCache);
-    //         }
-
-    //         $this->totalCount = \count($this->eventCache);
-
-    //         // Remove excess dates based on ::$limit and ::$offset
-    //         $this->cutOffExcess($this->eventCache);
-
-    //         $this->cacheToStorage();
-    //         $this->orderEvents($this->events);
-    //         $this->indexEvents($this->events);
-
-    //         // Build up an event cache, to be accessed later
-    //         $this->cacheEvents();
-    //         self::$lastCachedConfigStateHash = $configHash;
-    //     }
-
-    //     return $this->events;
-    // }
-
     protected function beforePrepare(): bool
     {
         $overridesTable = EventOverride::TABLE_STD;
@@ -223,6 +104,8 @@ class EventOverrideQuery extends ElementQuery
             $overridesTable.'.[[authorId]]',
             $overridesTable.'.[[eventId]]',
             $overridesTable.'.[[date]]',
+            $overridesTable.'.[[startTime]]',
+            $overridesTable.'.[[endTime]]',
             $overridesTable.'.[[allDay]]',
             $usersTable.'.[[username]]'
         ];
